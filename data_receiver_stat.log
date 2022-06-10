@@ -1,0 +1,18 @@
+Data receiver statistics (2022-06-14T16:48:20):
+Received total number of packages: 2000
+Procecced total number of packages: 1371
+Dropped total number of packages: 629
+Number of MIN length errors: 0
+Number of received length errors: 0
+Number of MD5 check errors: 0
+
+Configuration:
+local_ip: 192.168.0.17
+local_port: 50002
+remote_ip: 192.168.0.18
+remote_port: 50001
+read_delay: 15
+waiting_incomming_data_sec: 120
+waiting_after_data_stop_sec: 10
+write_file: 1
+write_hex: 1

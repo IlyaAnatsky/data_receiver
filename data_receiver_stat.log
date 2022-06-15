@@ -1,7 +1,7 @@
-Data receiver statistics (2022-06-14T16:48:20):
+Data receiver statistics (2022-06-15T17:56:02):
 Received total number of packages: 2000
-Procecced total number of packages: 1371
-Dropped total number of packages: 629
+Procecced total number of packages: 1536
+Dropped total number of packages: 463
 Number of MIN length errors: 0
 Number of received length errors: 0
 Number of MD5 check errors: 0
@@ -15,4 +15,4 @@ read_delay: 15
 waiting_incomming_data_sec: 120
 waiting_after_data_stop_sec: 10
 write_file: 1
-write_hex: 1
+write_hex: 0

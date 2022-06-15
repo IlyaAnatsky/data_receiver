@@ -22,12 +22,11 @@ constexpr auto size_len = 2;
 constexpr auto number_len = 4;
 constexpr auto time_len = 23;
 constexpr auto md5_len = 16;
-constexpr auto min_data_len = 600;
-constexpr auto max_data_len = 1600;
+constexpr auto min_data_len = (600 * sizeof(uint16_t));
+constexpr auto max_data_len = (1600 * sizeof(uint16_t));
 constexpr auto header_len = size_len + number_len + time_len + md5_len;
 constexpr auto max_buffer_size = header_len + max_data_len;
-constexpr auto cir_buffer_len = 16;
-
+ 
 struct SReceiveStatistics 
 {
     int received_number_packages;
@@ -48,43 +47,42 @@ struct SReceiveStatistics
     }
 };
 
-struct SOneBuffer 
+struct SOneBuffer
 {
-    std::mutex mtx;
-    uint8_t isData;
+    bool isData;
     uint8_t buffer[max_buffer_size];
 
-    SOneBuffer() 
+    SOneBuffer()
     {
-
         isData = false;
         memset(buffer, 0, sizeof(buffer));
     };
 };
 
-static SOneBuffer circular_buffer[cir_buffer_len];
 static SReceiveStatistics recvStat;
+static std::atomic<int> processDataInd{ 0 };
+static std::atomic<int> receiveDataInd{ 1 };
 
-bool MD5Check(uint8_t* buffer_p) 
-{
-    uint16_t dataSize = *((uint16_t*) buffer_p);
-  
+int getNextElement(int element, const int size)
+{    
+    return ((++element) == size ? 0 : element);
+}
+
+bool MD5Check(uint8_t* buffer_p)
+{    
+    uint16_t dataSize = ntohs(*((uint16_t*)buffer_p));  
     boost::uuids::detail::md5 boost_md5;
     boost_md5.process_bytes(buffer_p + header_len, dataSize);
     boost::uuids::detail::md5::digest_type digest;
-    boost_md5.get_digest(digest);    
-
+    boost_md5.get_digest(digest);
     uint8_t* md5_p = buffer_p + size_len + number_len + time_len;
     uint8_t* uint8_digest_p = reinterpret_cast<uint8_t*>(&digest);
     
     return std::equal(md5_p, md5_p + md5_len, uint8_digest_p);
 }
 
-void receiveFromUDP(SConfigV& configval)
+void receiveFromUDP(SConfigV& configval, std::vector<SOneBuffer>& circular_buffer)
 {   
-    static auto indexWrite = 0;
-    uint8_t writeBuffer[max_buffer_size] = { 0 };
-    
     using namespace boost::asio;
     io_service service;
     ip::udp::socket sock(service);
@@ -92,6 +90,8 @@ void receiveFromUDP(SConfigV& configval)
     ip::udp::endpoint local_ep(ip::address::from_string(configval.local_ip), configval.local_port);
     sock.bind(local_ep);
     ip::udp::endpoint sender_ep;
+    
+    uint8_t writeBuffer[max_buffer_size] = { 0 };
 
     for (;;)
     {
@@ -99,46 +99,35 @@ void receiveFromUDP(SConfigV& configval)
 
         recvStat.received_number_packages++;
 
-        // Check for MIN length
-        if (receivedSize < min_data_len)
+        int nextElement = getNextElement(receiveDataInd.load(), circular_buffer.size());        
+        if (nextElement != processDataInd.load())
         {
-            recvStat.errors_min_length++;
-            std::cout << "Error: incorrect MIN length" << std::endl;
-            continue;
-        }
-
-        // Check for correct received length
-        uint16_t* size_p = (uint16_t*)writeBuffer;
-        if (((*size_p) + header_len) != ((uint16_t) receivedSize))
-        {
-            recvStat.errors_received_length++;
-            std::cout << "Error: incorrect received length!" << std::endl;            
-            continue;
-        }
-                
-        int indexEnd = indexWrite;
-        if (++indexWrite == cir_buffer_len) indexWrite = 0;
-
-        while (indexEnd != indexWrite)
-        {
-            if (circular_buffer[indexWrite].mtx.try_lock())
+            // Check for MIN length
+            if (receivedSize < min_data_len)
             {
-                if (circular_buffer[indexWrite].isData == false)
-                {
-                    memcpy(circular_buffer[indexWrite].buffer, writeBuffer, max_buffer_size);
-                    circular_buffer[indexWrite].isData = true;
-                    circular_buffer[indexWrite].mtx.unlock();
-                    break;
-                }
-                circular_buffer[indexWrite].mtx.unlock();
+                recvStat.errors_min_length++;
+                std::cout << "Error: incorrect MIN length" << std::endl;
+                continue;
             }
-            if (++indexWrite == cir_buffer_len) indexWrite = 0;
-        }
 
-        if (indexEnd == indexWrite)
+            // Check for correct received length
+            uint16_t expectSize = ntohs(*((uint16_t*)writeBuffer)) + header_len;
+            if (expectSize != (uint16_t)receivedSize)
+            {
+                recvStat.errors_received_length++;
+                std::cout << "Error: incorrect received length,(receivedSize="
+                    << receivedSize << ") != (expectSize=" << expectSize
+                    << ")!" << std::endl;
+                continue;
+            }
+            memcpy(circular_buffer[nextElement].buffer, writeBuffer, max_buffer_size);
+            circular_buffer[nextElement].isData = true;
+            receiveDataInd.store(nextElement);
+        }
+        else
         {
             recvStat.dropped_number_packages++;
-        }
+        }        
     }
     sock.close();
 }
@@ -147,7 +136,7 @@ void receiveFromUDP(SConfigV& configval)
 //* main() for data receiver application                                         *
 //********************************************************************************
 int main()
-{   
+{
     static auto indexRead = 0;
 
     std::cout << "\nData receiver application is started\n";
@@ -181,7 +170,9 @@ int main()
     std::ofstream fout;
     if (configval.write_file) fout.open("data_receiver.log");
 
-    std::thread threadForReceiveFromUDP([&](){receiveFromUDP(configval);});
+    std::vector<SOneBuffer> circular_buffer(configval.circular_buffer_num_elements);
+
+    std::thread threadForReceiveFromUDP([&](){receiveFromUDP(configval, circular_buffer);});
     threadForReceiveFromUDP.detach();
     
     auto startTime = std::time(0);
@@ -190,16 +181,17 @@ int main()
 
     while (true)
     {
-        if (circular_buffer[indexRead].mtx.try_lock())
+        int nextElement = getNextElement(processDataInd.load(), circular_buffer.size());
+        if (nextElement != receiveDataInd.load())
         {
-            if (circular_buffer[indexRead].isData == true)
+            if (circular_buffer[nextElement].isData)
             {
-                uint8_t* buffer_p = circular_buffer[indexRead].buffer;
+                uint8_t* buffer_p = circular_buffer[nextElement].buffer;
 
-                uint16_t* size_p = (uint16_t*)buffer_p;
-                uint32_t* number_p = (uint32_t*)(buffer_p + size_len);
+                uint16_t dataSize = ntohs(*(uint16_t*)buffer_p);
+                uint32_t numberMsg = ntohl(*(uint32_t*)(buffer_p + size_len));
 
-                // Check for MD5 
+                // Check for MD5
                 bool md5_check = MD5Check(buffer_p);
                 if (md5_check == false)
                 {
@@ -209,8 +201,8 @@ int main()
                 // Print to console
                 std::stringstream logstr;
                 std::string timestemp((char*)(buffer_p + size_len + number_len), time_len);
-                logstr << "Processed: #number message=" << *number_p
-                       << "\tSize=" << *size_p
+                logstr << "Processed: #number message=" << numberMsg
+                       << "\tSize=" << dataSize
                        << "\tTime=" << timestemp
                        << "\tMD5 check=" << (md5_check == true ? "PASS" : "FAIL") << std::endl;
                 std::cout << logstr.str();
@@ -222,25 +214,25 @@ int main()
                     if (configval.write_hex)
                     {
                         std::string str_msg_hex("");
-                        boost::algorithm::hex(buffer_p, buffer_p + (*size_p + header_len), std::back_inserter(str_msg_hex));
+                        boost::algorithm::hex(buffer_p, buffer_p + (dataSize + header_len), std::back_inserter(str_msg_hex));
                         fout << "data=" << str_msg_hex << "\n";
                     }
                     fout << std::endl;
                     fout.flush();
                 }
-
                 recvStat.procecced_number_packages++;
-                circular_buffer[indexRead].isData = false;
+
                 startForWaiting = std::time(0);
                 waitingForSec = configval.waiting_after_data_stop_sec;
-            }
-            circular_buffer[indexRead].mtx.unlock();
+
+                // Waiting for some time, expected: 15ms, according to task requirements
+                std::this_thread::sleep_for(std::chrono::milliseconds(configval.process_delay_ms));
+
+                circular_buffer[nextElement].isData = false;                               
+            }            
+            processDataInd.store(nextElement);
         }
-        if (++indexRead == cir_buffer_len) indexRead = 0;
-
-        // Waiting for some time, expected: 15ms, according to task requirements
-        std::this_thread::sleep_for(std::chrono::milliseconds(configval.process_delay_ms));
-
+        
         // Check for break by timeout
         if ((startForWaiting + waitingForSec) < std::time(0))
         {

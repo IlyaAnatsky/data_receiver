@@ -62,6 +62,7 @@ struct SConfigV
     int local_port = 0;
     std::string remote_ip = "";
     int remote_port = 0;
+    int circular_buffer_num_elements = 0;
     int process_delay_ms = 0;
     int waiting_incomming_data_sec = 0;
     int waiting_after_data_stop_sec = 0;
@@ -92,6 +93,11 @@ struct SConfigV
             std::cout << "Incorrect: System.local_ip\n";
             incorrect = true;
         }
+        else if (config.GetValue("Mode.circular_buffer_num_elements", circular_buffer_num_elements) == false)
+        {
+            std::cout << "Incorrect: Mode.circular_buffer_num_elements\n";
+            incorrect = true;
+        }        
         else if (config.GetValue("Mode.process_delay_ms", process_delay_ms) == false)
         {
             std::cout << "Incorrect: Mode.process_delay_ms\n";
@@ -121,6 +127,11 @@ struct SConfigV
             remote_ip == "" || (remote_port < min_udp_port))
         {
             std::cout << "Incorrect: local_ip or local_port or remote_ip or remote_port\n";
+            incorrect = true;
+        }
+        else if (circular_buffer_num_elements < 2)
+        {
+            std::cout << "'circular_buffer_num_elements' shuld not be less then 3.\n";
             incorrect = true;
         }
 

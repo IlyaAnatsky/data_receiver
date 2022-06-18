@@ -1,7 +1,7 @@
 
-CC=gcc
+CXX=/usr/bin/g++-7
 
-CFLAGS = -c
+CFLAGS = -c -std=c++11
 LFLAGS = -o
 
 LIBS = -lpthread -lboost_filesystem -lboost_system
@@ -19,7 +19,7 @@ all: uninstall clean $(EXECUTABLE) install start_test
 $(EXECUTABLE): $(OBJECTS)
 	$(CXX) $(LFLAGS) $(EXECUTABLE) $(OBJECTS) $(LIBS)
 
-.c.o:
+.cpp.o:
 	$(CXX) $(CFLAGS) $< -o $@
 
 clean: 

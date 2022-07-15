@@ -1,5 +1,5 @@
 
-CXX=/usr/bin/g++-7
+CXX=/usr/bin/g++-11
 
 CFLAGS = -c -std=c++11
 LFLAGS = -o
@@ -12,9 +12,9 @@ OBJECTS = $(SOURCES:.cpp=.o)
 
 EXECUTABLE = data_receiver
 
-PREFIX = ./bin
+PREFIX = .
 
-all: uninstall clean $(EXECUTABLE) install start_test
+all: clean $(EXECUTABLE) start_test
 
 $(EXECUTABLE): $(OBJECTS)
 	$(CXX) $(LFLAGS) $(EXECUTABLE) $(OBJECTS) $(LIBS)
@@ -24,13 +24,6 @@ $(EXECUTABLE): $(OBJECTS)
 
 clean: 
 	rm -rf $(EXECUTABLE) *.o
-	
-install:
-	test -d $(PREFIX) || mkdir $(PREFIX) 
-	mv -f ./$(EXECUTABLE) $(PREFIX)
-			
-uninstall:
-	rm -rf $(PREFIX)/$(EXECUTABLE) 
 
 start_test:
 	test -f $(PREFIX)/$(EXECUTABLE) && $(PREFIX)/$(EXECUTABLE)
